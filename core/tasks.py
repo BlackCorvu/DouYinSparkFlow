@@ -244,6 +244,7 @@ def do_user_task(browser, username, cookies, targets):
         retries=config["taskRetryTimes"],
         delay=5,
         url="https://www.douyin.com/chat",
+        wait_until="domcontentloaded",  # 只等 DOM 就绪，不等所有资源加载，避免海外访问 load 事件超时
     )
 
     time.sleep(5)  # 等待5秒让过可能存在的弹窗
@@ -299,7 +300,14 @@ def runTasks():
             # 创建任务，未找到全部目标时整体重试，避免单次页面异常漏发
             max_attempts = config.get("taskRetryTimes", 3)
             for attempt in range(1, max_attempts + 1):
-                handled = do_user_task(browser, username, cookies, targets)
+                try:
+                    handled = do_user_task(browser, username, cookies, targets)
+                except Exception as e:
+                    logger.warning(
+                        f"账号 {username} 第 {attempt} 次运行异常: {e}，准备重试"
+                    )
+                    handled = []
+                    time.sleep(5)
                 missing = [t for t in targets if t not in handled]
                 if not missing:
                     break
