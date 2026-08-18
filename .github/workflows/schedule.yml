@@ -2,7 +2,7 @@ name: DouYin Spark Flow Schedule Run
 on:
   workflow_dispatch: # 允许手动触发
   schedule: # 定时任务
-    - cron: "25 22 * * *" # 每天 22:25 UTC（对应北京时间 6:25 触发，随后随机等待到 6:30-9:30 之间发送）
+    - cron: "25 10 * * *" # 每天 10:25 UTC（对应北京时间 18:25 触发，随后随机等待到 18:30-21:30 之间发送）
 jobs:
   run-main:
     timeout-minutes: 240
@@ -28,7 +28,7 @@ jobs:
         VARS_JSON: ${{ toJson(vars) }}
         SECRETS_JSON: ${{ toJson(secrets) }}
       run: python utils/export_github_env.py
-    - name: 随机等待到发送时间窗口（北京时间 6:30-9:30）
+    - name: 随机等待到发送时间窗口（北京时间 18:30-21:30）
       if: github.event_name == 'schedule' # 仅定时触发时随机等待；手动触发立即执行
       run: |
         SLEEP_SEC=$((RANDOM % 10500 + 300)) # 5 分钟 ~ 2 小时 55 分钟
