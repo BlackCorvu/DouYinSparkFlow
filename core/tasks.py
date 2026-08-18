@@ -100,6 +100,10 @@ def scroll_and_select_user(page, username, targets):
     logger.debug(f"账号 {username} 开始查找目标好友列表")
     logger.debug(f"账号 {username} 目标好友列表: {targets}")
 
+    # [修复] 等待会话列表出现并稳定加载（列表懒加载较慢，过早滚动会漏掉会话）
+    page.wait_for_selector(target_selector, timeout=config["browserTimeout"])
+    time.sleep(3)
+
     found_targets = set()
     # [修改] 复制一份目标列表用于追踪进度
     remaining_targets = set(targets)
@@ -245,9 +249,10 @@ def do_user_task(browser, username, cookies, targets):
     time.sleep(5)  # 等待5秒让过可能存在的弹窗
 
     logger.debug(f"账号 {username} 开始发送消息")
+    handled = []
     # 滚动并选择用户
-    for username in scroll_and_select_user(page, username, targets):
-        logger.debug(f"账号 {username} 已选中好友 {username} 发送消息")
+    for target in scroll_and_select_user(page, username, targets):
+        logger.debug(f"账号 {username} 已选中好友 {target} 发送消息")
         # 等待聊天输入框元素加载完成，使用更稳定的属性选择器
         chat_input_selector = CHAT_EDITOR_SELECTOR
         page.wait_for_selector(chat_input_selector, timeout=config["browserTimeout"])
@@ -261,13 +266,15 @@ def do_user_task(browser, username, cookies, targets):
             if line != message.split("\\n")[-1]:
                 chat_input.press("Shift+Enter")  # 模拟 Shift+Enter 插入换行
 
-        logger.debug(f"账号 {username} 准备发送消息给好友 {username}：\n\t{message}")
-        logger.debug(f"账号 {username} 给好友 {username} 发送消息完成")
+        logger.debug(f"账号 {username} 准备发送消息给好友 {target}：\n\t{message}")
+        logger.debug(f"账号 {username} 给好友 {target} 发送消息完成")
         # 模拟按下回车键发送消息
         chat_input.press("Enter")
         time.sleep(2)  # 发送完等待一会儿
+        handled.append(target)
 
     context.close()  # 任务完成后关闭上下文
+    return handled
 
 
 def runTasks():
@@ -289,8 +296,19 @@ def runTasks():
             targets = user["targets"]
             username = user.get("username", "未知用户")
             logger.info(f"开始处理账号 {username}")
-            # 创建任务
-            do_user_task(browser, username, cookies, targets)
+            # 创建任务，未找到全部目标时整体重试，避免单次页面异常漏发
+            max_attempts = config.get("taskRetryTimes", 3)
+            for attempt in range(1, max_attempts + 1):
+                handled = do_user_task(browser, username, cookies, targets)
+                missing = [t for t in targets if t not in handled]
+                if not missing:
+                    break
+                logger.warning(
+                    f"账号 {username} 第 {attempt} 次运行后仍有好友未发送: {missing}，准备重试"
+                )
+                time.sleep(5)
+            else:
+                logger.error(f"账号 {username} 重试 {max_attempts} 次后仍有好友未发送: {missing}")
             logger.info(f"账号 {username} 任务完成")
     finally:
         # 关闭浏览器实例
