@@ -268,10 +268,23 @@ def do_user_task(browser, username, cookies, targets):
                 chat_input.press("Shift+Enter")  # 模拟 Shift+Enter 插入换行
 
         logger.debug(f"账号 {username} 准备发送消息给好友 {target}：\n\t{message}")
-        logger.debug(f"账号 {username} 给好友 {target} 发送消息完成")
         # 模拟按下回车键发送消息
         chat_input.press("Enter")
         time.sleep(2)  # 发送完等待一会儿
+        # 发送后校验：正常发送后输入框应被清空；有残留说明消息没发出去
+        try:
+            leftover = chat_input.inner_text().strip()
+        except Exception:
+            leftover = "<读取输入框失败>"
+        if leftover:
+            logger.error(f"账号 {username} 给好友 {target} 发送疑似失败！输入框残留: {leftover!r}，当前页面: {page.url}")
+        else:
+            logger.debug(f"账号 {username} 给好友 {target} 发送消息完成（输入框已清空）")
+        # 发送后截屏留证
+        try:
+            page.screenshot(path=f"logs/after_send_{username}_{target}.png")
+        except Exception as e:
+            logger.warning(f"账号 {username} 截屏失败: {e}")
         handled.append(target)
 
     context.close()  # 任务完成后关闭上下文
