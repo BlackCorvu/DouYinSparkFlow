@@ -3,8 +3,10 @@
 name: 【api（测试）分支】DouYin Spark Flow Schedule Run
 on:
   workflow_dispatch: # 允许手动触发
-  schedule: # 定时任务
-    - cron: "0 1 * * *" # 每天 1:00 UTC（对应北京时间 9:00）
+  # [2026-09-18] 停用定时：与主 workflow 同用 user-data 环境的 cookies，
+  # Actions 出口 IP 会被抖音风控踢会话，且与其他运行环境双 IP 混用互相顶下线
+  # schedule: # 定时任务
+  #   - cron: "0 1 * * *" # 每天 1:00 UTC（对应北京时间 9:00）
 jobs:
   run-main:
     timeout-minutes: 20

@@ -1,5 +1,4 @@
 import traceback
-import sys  # noqa: F401  # [加固 2026-09-18] 供失败时显式退出码使用（main.py 依据 runTasks 返回值退出）
 from utils.logger import setup_logger
 from utils.config import get_config, get_userData
 from utils import norm
@@ -13,6 +12,10 @@ userData = get_userData()
 logger = setup_logger(level=config.get("logLevel", "Info"))
 matchMode = config.get("matchMode", "nickname")
 userIDDict = {}
+
+
+class LoginExpiredError(RuntimeError):
+    """[加固 2026-09-18] cookies 过期或会话被风控下线时抛出，供 runTasks 类型化识别后跳过重试"""
 
 CONVERSATION_ITEM_SELECTOR = ".conversationConversationItemwrapper"
 CONVERSATION_TITLE_SELECTOR = ".conversationConversationItemtitle"
@@ -264,7 +267,7 @@ def do_user_task(browser, username, cookies, targets):
     # [加固 2026-09-18] 登录态检测：cookies 过期/被风控下线时页面会跳登录或弹扫码框，
     # 此时等会话列表只会白等 120s 超时且退出码还是 0（假成功）。这里快速失败并留截图。
     def _looks_logged_out() -> bool:
-        if "passport" in page.url or "login" in page.url:
+        if "passport" in page.url or "/login" in page.url:
             return True
         for sel in ('iframe[src*="passport"]', "text=扫码登录", "text=验证码登录"):
             try:
@@ -279,7 +282,7 @@ def do_user_task(browser, username, cookies, targets):
             page.screenshot(path=f"logs/login_expired_{username}.png")
         except Exception:
             pass
-        raise RuntimeError(
+        raise LoginExpiredError(
             f"登录已失效（cookies 过期或被风控下线），请更新 cookies；当前页面: {page.url}"
         )
 
@@ -310,16 +313,17 @@ def do_user_task(browser, username, cookies, targets):
             leftover = chat_input.inner_text().strip()
         except Exception:
             leftover = "<读取输入框失败>"
-        if leftover:
-            logger.error(f"账号 {username} 给好友 {target} 发送疑似失败！输入框残留: {leftover!r}，当前页面: {page.url}")
-        else:
-            logger.debug(f"账号 {username} 给好友 {target} 发送消息完成（输入框已清空）")
         # 发送后截屏留证
         try:
             page.screenshot(path=f"logs/after_send_{username}_{target}.png")
         except Exception as e:
             logger.warning(f"账号 {username} 截屏失败: {e}")
-        handled.append(target)
+        if leftover:
+            # [审查修复 2026-09-18] 疑似发送失败不计入 handled，让外层重试循环重试该批次
+            logger.error(f"账号 {username} 给好友 {target} 发送疑似失败！输入框残留: {leftover!r}，当前页面: {page.url}")
+        else:
+            logger.debug(f"账号 {username} 给好友 {target} 发送消息完成（输入框已清空）")
+            handled.append(target)
 
     context.close()  # 任务完成后关闭上下文
     return handled
@@ -361,7 +365,7 @@ def runTasks():
                         f"账号 {username} 第 {attempt} 次运行异常: {e}，准备重试"
                     )
                     handled = []
-                    if "登录已失效" in str(e):
+                    if isinstance(e, LoginExpiredError):
                         # [加固] 登录失效重试没有意义，跳过剩余重试避免白等 3×120s
                         logger.error(f"账号 {username} 登录失效，跳过剩余重试（请更新 cookies）")
                         account_ok = False
@@ -379,7 +383,9 @@ def runTasks():
                 account_ok = False
             if not account_ok:
                 all_ok = False
-            logger.info(f"账号 {username} 任务完成")
+                logger.error(f"账号 {username} 任务失败，详情见上方 ERROR")
+            else:
+                logger.info(f"账号 {username} 任务完成")
 
         return all_ok
     finally:
