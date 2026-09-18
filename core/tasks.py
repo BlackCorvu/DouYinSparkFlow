@@ -1,4 +1,5 @@
 import traceback
+import sys  # noqa: F401  # [加固 2026-09-18] 供失败时显式退出码使用（main.py 依据 runTasks 返回值退出）
 from utils.logger import setup_logger
 from utils.config import get_config, get_userData
 from utils import norm
@@ -101,7 +102,18 @@ def scroll_and_select_user(page, username, targets):
     logger.debug(f"账号 {username} 目标好友列表: {targets}")
 
     # [修复] 等待会话列表出现并稳定加载（列表懒加载较慢，过早滚动会漏掉会话）
-    page.wait_for_selector(target_selector, timeout=config["browserTimeout"])
+    try:
+        page.wait_for_selector(target_selector, timeout=config["browserTimeout"])
+    except Exception:
+        # [加固 2026-09-18] 失败现场截图：区分登录失效 / 页面改版，避免无头跑完只剩一句超时
+        try:
+            page.screenshot(path=f"logs/list_timeout_{username}.png")
+            logger.error(
+                f"账号 {username} 会话列表等待超时，已截图 logs/list_timeout_{username}.png，当前页面: {page.url}"
+            )
+        except Exception:
+            pass
+        raise
     time.sleep(3)
 
     found_targets = set()
@@ -249,6 +261,28 @@ def do_user_task(browser, username, cookies, targets):
 
     time.sleep(5)  # 等待5秒让过可能存在的弹窗
 
+    # [加固 2026-09-18] 登录态检测：cookies 过期/被风控下线时页面会跳登录或弹扫码框，
+    # 此时等会话列表只会白等 120s 超时且退出码还是 0（假成功）。这里快速失败并留截图。
+    def _looks_logged_out() -> bool:
+        if "passport" in page.url or "login" in page.url:
+            return True
+        for sel in ('iframe[src*="passport"]', "text=扫码登录", "text=验证码登录"):
+            try:
+                if page.locator(sel).first.is_visible():
+                    return True
+            except Exception:
+                continue
+        return False
+
+    if _looks_logged_out():
+        try:
+            page.screenshot(path=f"logs/login_expired_{username}.png")
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"登录已失效（cookies 过期或被风控下线），请更新 cookies；当前页面: {page.url}"
+        )
+
     logger.debug(f"账号 {username} 开始发送消息")
     handled = []
     # 滚动并选择用户
@@ -305,6 +339,12 @@ def runTasks():
                 f"用户: {user.get('username', '未知用户')}, 目标好友: {user['targets']}"
             )
 
+        if not userData:
+            # [加固] TASKS 没配或 cookies 缺失时直接判失败，不允许静默成功
+            logger.error("没有可运行的任务（TASKS 未配置或 cookies 缺失），按失败处理")
+            return False
+
+        all_ok = True
         for user in userData:
             cookies = user["cookies"]
             targets = user["targets"]
@@ -312,6 +352,7 @@ def runTasks():
             logger.info(f"开始处理账号 {username}")
             # 创建任务，未找到全部目标时整体重试，避免单次页面异常漏发
             max_attempts = config.get("taskRetryTimes", 3)
+            account_ok = True
             for attempt in range(1, max_attempts + 1):
                 try:
                     handled = do_user_task(browser, username, cookies, targets)
@@ -320,6 +361,11 @@ def runTasks():
                         f"账号 {username} 第 {attempt} 次运行异常: {e}，准备重试"
                     )
                     handled = []
+                    if "登录已失效" in str(e):
+                        # [加固] 登录失效重试没有意义，跳过剩余重试避免白等 3×120s
+                        logger.error(f"账号 {username} 登录失效，跳过剩余重试（请更新 cookies）")
+                        account_ok = False
+                        break
                     time.sleep(5)
                 missing = [t for t in targets if t not in handled]
                 if not missing:
@@ -330,7 +376,12 @@ def runTasks():
                 time.sleep(5)
             else:
                 logger.error(f"账号 {username} 重试 {max_attempts} 次后仍有好友未发送: {missing}")
+                account_ok = False
+            if not account_ok:
+                all_ok = False
             logger.info(f"账号 {username} 任务完成")
+
+        return all_ok
     finally:
         # 关闭浏览器实例
         browser.close()

@@ -5,6 +5,10 @@ if os.path.exists(".env"):
 
     load_dotenv(".env")
 
+import sys
+
 from core.tasks import runTasks
 
-runTasks()
+# [加固 2026-09-18] 失败时退出码非零：cron / GitHub Actions 才能感知真实失败，不再假成功
+if not runTasks():
+    sys.exit(1)
