@@ -2,7 +2,8 @@ name: DouYin Spark Flow Schedule Run
 on:
   workflow_dispatch: # 允许手动触发
   # [2026-09-18] 停用定时：抖音风控会踢掉 GitHub Actions 出口 IP 的会话（上游 issue #80），
-  # 且同一份 cookies 与开发机 crontab 双 IP 混用会互相顶下线。主运行已迁至开发机，这里保留手动触发用于验证。
+  # 定时跑必然失败。恢复定时需换国内/住宅 IP 环境运行并更新 cookies；
+  # 注意同一份 cookies 不要在两个 IP 环境同时使用，会互相顶下线。
   # schedule: # 定时任务
   #   - cron: "0 6 * * *" # 每天 06:00 UTC（对应北京时间 14:00）
 jobs:
