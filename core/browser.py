@@ -38,9 +38,19 @@ def get_browser():
         )
 
     try:
+        # [加固 2026-09-18] channel/headless 可用环境变量覆盖：
+        # 国内网络常拉不到 playwright CDN 的 chromium，设 CHROME_CHANNEL=chrome
+        # 可直接用本机已装的 Google Chrome；CHROME_HEADLESS=1 强制无头（覆盖 DEBUG 的可视化模式）。
+        channel = os.getenv("CHROME_CHANNEL", "").strip()
+        headless_env = os.getenv("CHROME_HEADLESS", "").strip().lower()
+        if headless_env:
+            headless = headless_env not in ("0", "false", "no")
         # 启动浏览器
-        playwright = sync_playwright().start() 
-        browser = playwright.chromium.launch(headless=headless)
+        playwright = sync_playwright().start()
+        launch_kwargs = {"headless": headless}
+        if channel:
+            launch_kwargs["channel"] = channel
+        browser = playwright.chromium.launch(**launch_kwargs)
         return playwright, browser
     except Exception as e:
         # 捕获浏览器启动错误
