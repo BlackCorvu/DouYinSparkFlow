@@ -1,3 +1,4 @@
+import random
 import traceback
 from utils.logger import setup_logger
 from utils.config import get_config, get_userData
@@ -37,7 +38,7 @@ def handle_response(response: Response):
             json_data = response.json()
             # print("\n📦 响应 JSON 数据：")
             # print(json.dumps(json_data, indent=4, ensure_ascii=False))
-            for item in json_data.get("data", []):
+            for item in (json_data.get("data") or []):
                 short_id = item.get("short_id")
                 unique_id = item.get("unique_id")
                 sec_uid = item.get("sec_uid", "")
@@ -299,20 +300,30 @@ def do_user_task(browser, username, cookies, targets):
         # 在 chat-input-dccKiL 中输入内容
         message = build_message()
         for line in message.split("\\n"):
-            chat_input.type(line)  # 输入每一行
+            chat_input.type(line, delay=random.uniform(80, 160))  # 逐字输入，模拟真人节奏
             # 如果不是最后一行，模拟 Shift+Enter 插入换行
             if line != message.split("\\n")[-1]:
                 chat_input.press("Shift+Enter")  # 模拟 Shift+Enter 插入换行
 
         logger.debug(f"账号 {username} 准备发送消息给好友 {target}：\n\t{message}")
+        # [Humanize 2026-09-20] 随机等待 + 逐字输入间隔，降低机器人指纹，避免触发风控踢登录
+        time.sleep(random.uniform(1.5, 3.5))
         # 模拟按下回车键发送消息
         chat_input.press("Enter")
         time.sleep(2)  # 发送完等待一会儿
         # 发送后校验：正常发送后输入框应被清空；有残留说明消息没发出去
         try:
-            leftover = chat_input.inner_text().strip()
+            leftover = chat_input.inner_text()
         except Exception:
             leftover = "<读取输入框失败>"
+        # [修复 2026-09-20] 抖音编辑器发送后会残留零宽占位符（\u200b 等），不算残留
+        leftover = (
+            leftover.replace("\u200b", "")
+            .replace("\u200c", "")
+            .replace("\u200d", "")
+            .replace("\ufeff", "")
+            .strip()
+        )
         # 发送后截屏留证
         try:
             page.screenshot(path=f"logs/after_send_{username}_{target}.png")
