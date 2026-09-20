@@ -12,6 +12,14 @@ if os.path.exists(".env"):
 
     load_dotenv(".env")
 
+# 与 run-spark.sh 同款注入：直跑时从 .cookies.json 加载 cookies 环境变量
+if not os.getenv("COOKIES_20281969") and os.path.exists(".cookies.json"):
+    import json
+
+    os.environ["COOKIES_20281969"] = json.dumps(
+        json.load(open(".cookies.json")), ensure_ascii=True
+    )
+
 from utils.config import get_userData
 from core.browser import get_browser
 
